@@ -3,10 +3,14 @@ package com.tech.whatsup.message;
 import com.tech.whatsup.chat.Chat;
 import com.tech.whatsup.chat.ChatRepository;
 import com.tech.whatsup.file.FileService;
+import com.tech.whatsup.notification.Notification;
+import com.tech.whatsup.notification.NotificationService;
+import com.tech.whatsup.notification.NotificationType;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -19,6 +23,7 @@ public class MessageService{
     private final MessageRepository messageRepository;
     private final MessageMapper mapper;
     private final FileService fileService;
+    private final NotificationService notificationService;
 
 
     public void saveMessage (MessageRequest messageRequest) {
@@ -36,16 +41,42 @@ public class MessageService{
         message.setSenderId(message.getSenderId());
 
         messageRepository.save(message);
-        //TODO: NOTIFICATION to be implimented
+
+
+        Notification notification = Notification.builder()
+                .chatId(chat.getId())
+                .messageType(messageRequest.getType())
+                .content(messageRequest.getContent())
+                .senderId(messageRequest.getSenderId())
+                .receiverId(messageRequest.getReceiverId())
+                .type(NotificationType.MESSAGE)
+                .chatName(chat.getTargetChatName(message.getSenderId()))
+                .build();
+
+        notificationService.sendNotification(messageRequest.getReceiverId(), notification);
 
 
 
     }
 
 
+
+    @Transactional
     public void setMessageToSEEN (String chatID, Authentication authentication) {
+        Chat chat = chatRepository.findById(chatID)
+                .orElseThrow(() -> new RuntimeException("Chat not found"));
+        final String recipientId = getRecipientId(chat, authentication);
 
+        messageRepository.setMessagesToSeenByChatId(chatID, MessageState.SEEN);
 
+        Notification notification = Notification.builder()
+                .chatId(chat.getId())
+                .type(NotificationType.SEEN)
+                .receiverId(recipientId)
+                .senderId(getSenderId(chat, authentication))
+                .build();
+
+        notificationService.sendNotification(recipientId, notification);
     }
 
     public List<MessageResponse> findAllMessages (String chatID) {
